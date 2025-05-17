@@ -1,0 +1,32 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln.docstates
+
+# Build Output (if you were to add a build process later)
+dist/
+build/
+out/
+
+# Dependency Directories (not used in current simple HTML setup, but good practice)
+node_modules/
+bower_components/
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+*.swp
+*~
