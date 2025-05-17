@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three-Body Problem with Info Panel, Dust & Trails</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex; 
+            flex-direction: column; 
+        }
+        #renderCanvas {
+            width: 100%;
+            flex-grow: 1; 
+            touch-action: none;
+            outline: none;
+        }
+        #bottomBar { /* Container for controls and info panel */
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: rgba(10, 10, 20, 0.85); 
+            border-top: 1px solid #334;
+            display: flex;
+            justify-content: space-between; /* Align items */
+            align-items: flex-start; /* Align items to top */
+            flex-wrap: wrap; /* Allow wrapping on small screens */
+        }
+        #controlsContainer {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-grow: 1; /* Allow controls to take space */
+            justify-content: center; /* Center controls if space allows */
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        label {
+            margin: 0 10px 0 5px;
+            color: #c5cae9;
+        }
+        input[type="range"] {
+            vertical-align: middle;
+            width: 150px;
+        }
+        #gValueDisplay {
+            font-weight: bold;
+            color: #87CEFA; 
+        }
+
+        /* Info Panel Styling (Origami-inspired) */
+        #infoPanel {
+            background-color: #1a1a2e; 
+            border: 2px solid #4a0e6c; 
+            border-radius: 8px;
+            padding: 10px;
+            max-height: 100px; /* Max height for the panel in controls area */
+            min-width: 280px; /* Min width */
+            width: auto; /* Adjust to content or use a fixed width */
+            max-width: 350px; /* Max width */
+            box-shadow: 0 0 10px rgba(74, 14, 108, 0.5),
+                        inset 0 0 5px rgba(120, 80, 150, 0.3); 
+            position: relative;
+            overflow: hidden; 
+            margin-left: 10px; /* Space from controls */
+        }
+        #infoPanel::before { /* Simple corner fold effect */
+            content: "";
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-style: solid;
+            top: -1px; left: -1px; 
+            border-width: 15px 15px 0 0;
+            border-color: #000 transparent transparent transparent; 
+        }
+        #infoPanelTitle {
+            color: #e6ceff; 
+            text-align: center;
+            font-size: 0.9em;
+            margin-bottom: 8px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #7a5e8c; 
+        }
+        #infoPanelContent {
+            height: 50px; /* Fixed height for scrolling area */
+            overflow-y: auto;
+            font-size: 0.75em;
+            color: #b0bec5; 
+            padding-right: 8px; 
+            border-left: 2px solid #3a2e4c;
+            padding-left: 8px;
+        }
+        /* Custom Scrollbar for Info Panel */
+        #infoPanelContent::-webkit-scrollbar {
+            width: 8px;
+        }
+        #infoPanelContent::-webkit-scrollbar-track {
+            background: #1a1a2e;
+            border-radius: 4px;
+        }
+        #infoPanelContent::-webkit-scrollbar-thumb {
+            background: #4a0e6c;
+            border-radius: 4px;
+        }
+        #infoPanelContent::-webkit-scrollbar-thumb:hover {
+            background: #6a2e8c;
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <div id="bottomBar">
+        <div id="controlsContainer">
+            <button id="resetButton">Reset Simulation</button>
+            <label for="gConstant">Gravity (G): <span id="gValueDisplay">0.1</span></label>
+            <input type="range" id="gConstant" min="0.01" max="0.5" value="0.1" step="0.01">
+        </div>
+        <div id="infoPanel">
+            <div id="infoPanelTitle">Celestial Dynamics Log</div>
+            <div id="infoPanelContent">
+                <p><strong>System Initialized:</strong> Three-body gravitational simulation active. Observing complex orbital interactions.</p>
+                <p><strong>Particle Dust Field:</strong> Ambient particulate matter detected, providing visual depth to the void. Non-interactive.</p>
+                <p><strong>Orbital Tracers:</strong> Active for all primary bodies. Path history is being recorded and visualized.</p>
+                <p><strong>Note:</strong> The inherent nature of N-body systems often leads to chaotic behavior. Small changes in initial conditions or gravitational constants can lead to vastly different outcomes over time. This is a core principle of study.</p>
+                <p>Adjust gravitational constant 'G' to observe its effect on system stability and evolution.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('renderCanvas');
+        const engine = new BABYLON.Engine(canvas, true, { stencil: true, preserveDrawingBuffer: true }, true);
+        
+        let babylonScene, world, bodies = [], bodyMeshes = [], trailMeshes = [];
+        let G = 0.1; 
+        const gValueDisplay = document.getElementById('gValueDisplay');
+
+        function createScene() {
+            babylonScene = new BABYLON.Scene(engine);
+            babylonScene.clearColor = new BABYLON.Color4(0, 0, 0, 1); 
+
+            const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 3, 60, BABYLON.Vector3.Zero(), babylonScene);
+            camera.attachControl(canvas, true);
+            camera.wheelPrecision = 100; 
+            camera.minZ = 0.1;
+            camera.lowerRadiusLimit = 5;
+            camera.upperRadiusLimit = 200;
+
+            const light1 = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(1, 1, 0.5), babylonScene);
+            light1.intensity = 0.8;
+            const light2 = new BABYLON.PointLight("pointLight", new BABYLON.Vector3(0,0,0), babylonScene);
+            light2.intensity = 0.7;
+
+            const dustParticleSystem = new BABYLON.ParticleSystem("dust", 10000, babylonScene);
+            dustParticleSystem.particleTexture = new BABYLON.Texture("https://www.babylonjs-playground.com/textures/flare.png", babylonScene); 
+            dustParticleSystem.emitter = new BABYLON.Vector3(0,0,0); 
+            dustParticleSystem.minEmitBox = new BABYLON.Vector3(-150, -150, -150); 
+            dustParticleSystem.maxEmitBox = new BABYLON.Vector3(150, 150, 150);
+            dustParticleSystem.color1 = new BABYLON.Color4(0.8, 0.8, 1.0, 0.05); 
+            dustParticleSystem.color2 = new BABYLON.Color4(1.0, 1.0, 1.0, 0.08); 
+            dustParticleSystem.colorDead = new BABYLON.Color4(0, 0, 0, 0.0);
+            dustParticleSystem.minSize = 0.05;
+            dustParticleSystem.maxSize = 0.2;
+            dustParticleSystem.minLifeTime = 50; 
+            dustParticleSystem.maxLifeTime = 100;
+            dustParticleSystem.emitRate = 100; 
+            dustParticleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD; 
+            dustParticleSystem.gravity = new BABYLON.Vector3(0, 0, 0); 
+            dustParticleSystem.direction1 = new BABYLON.Vector3(-1, -1, -1); 
+            dustParticleSystem.direction2 = new BABYLON.Vector3(1, 1, 1);
+            dustParticleSystem.minAngularSpeed = 0;
+            dustParticleSystem.maxAngularSpeed = Math.PI / 8;
+            dustParticleSystem.minEmitPower = 0.01; 
+            dustParticleSystem.maxEmitPower = 0.05;
+            dustParticleSystem.updateSpeed = 0.01; 
+            dustParticleSystem.start();
+
+            world = new CANNON.World();
+            world.gravity.set(0, 0, 0); 
+
+            const bodyMaterialCannon = new CANNON.Material("bodyMaterial");
+            const bodyContactMaterial = new CANNON.ContactMaterial(bodyMaterialCannon, bodyMaterialCannon, {
+                friction: 0,
+                restitution: 0.5 
+            });
+            world.addContactMaterial(bodyContactMaterial);
+
+            const initialBodiesData = [
+                { mass: 100, radius: 1.5, color: new BABYLON.Color3(1, 0.6, 0.2), position: new CANNON.Vec3(-10, 0, 0), velocity: new CANNON.Vec3(0, 2.5, 0) }, 
+                { mass: 120, radius: 1.7, color: new BABYLON.Color3(0.5, 0.7, 1), position: new CANNON.Vec3(10, 0, 0), velocity: new CANNON.Vec3(0, -2.0, 0) }, 
+                { mass: 80,  radius: 1.3, color: new BABYLON.Color3(0.7, 0.7, 0.7), position: new CANNON.Vec3(0, 15, 0), velocity: new CANNON.Vec3(-1.5, 0, 0.2) }  
+            ];
+            
+            bodies = [];
+            bodyMeshes = [];
+            trailMeshes = [];
+            let largestBodyMesh = null;
+            let maxMass = 0;
+
+            initialBodiesData.forEach((data, index) => {
+                const cannonBody = new CANNON.Body({
+                    mass: data.mass,
+                    shape: new CANNON.Sphere(data.radius),
+                    material: bodyMaterialCannon,
+                    position: data.position,
+                    velocity: data.velocity
+                });
+                bodies.push(cannonBody);
+                world.addBody(cannonBody);
+
+                const babylonMesh = BABYLON.MeshBuilder.CreateSphere("body" + index, { diameter: data.radius * 2, segments: 32 }, babylonScene);
+                const material = new BABYLON.StandardMaterial("mat" + index, babylonScene);
+                material.diffuseColor = data.color;
+                material.specularColor = data.color.scale(0.3);
+                material.emissiveColor = data.color.scale(0.1); 
+                babylonMesh.material = material;
+                bodyMeshes.push(babylonMesh);
+
+                if (data.mass > maxMass) {
+                    maxMass = data.mass;
+                    largestBodyMesh = babylonMesh;
+                }
+
+                const trail = new BABYLON.TrailMesh("trail" + index, babylonMesh, babylonScene, 0.15, 500, true); 
+                const trailMaterial = new BABYLON.StandardMaterial("trailMat" + index, babylonScene);
+                trailMaterial.emissiveColor = data.color.scale(0.7); 
+                trailMaterial.diffuseColor = BABYLON.Color3.Black(); 
+                trailMaterial.specularColor = BABYLON.Color3.Black();
+                trail.material = trailMaterial;
+                trailMeshes.push(trail);
+            });
+
+            if (largestBodyMesh) {
+                light2.parent = largestBodyMesh; 
+            }
+            gValueDisplay.textContent = G.toFixed(2);
+            return babylonScene;
+        }
+        
+        function gameLoop() {
+            for (let i = 0; i < bodies.length; i++) {
+                for (let j = i + 1; j < bodies.length; j++) {
+                    const bodyA = bodies[i];
+                    const bodyB = bodies[j];
+
+                    const rVec = bodyB.position.vsub(bodyA.position); 
+                    const r = rVec.length();
+                    
+                    const softening = 0.1; 
+                    const forceMagnitude = (G * bodyA.mass * bodyB.mass) / ((r * r) + (softening * softening));
+                    
+                    if (r > 0.01) { 
+                        const forceVec = rVec.unit().scale(forceMagnitude);
+                        bodyA.applyForce(forceVec, bodyA.position);
+                        bodyB.applyForce(forceVec.negate(), bodyB.position);
+                    }
+                }
+            }
+
+            world.step(1 / 60); 
+
+            for (let i = 0; i < bodies.length; i++) {
+                bodyMeshes[i].position.copyFrom(bodies[i].position);
+                bodyMeshes[i].rotationQuaternion = bodyMeshes[i].rotationQuaternion || new BABYLON.Quaternion();
+                bodyMeshes[i].rotationQuaternion.copyFrom(bodies[i].quaternion);
+            }
+        }
+
+        function resetSimulation() {
+            if (babylonScene) {
+                trailMeshes.forEach(trail => trail.dispose());
+                bodyMeshes.forEach(mesh => mesh.dispose());
+                if (babylonScene.getParticleSystemByName("dust")) {
+                    babylonScene.getParticleSystemByName("dust").stop(); // Good practice to stop before disposing
+                    babylonScene.getParticleSystemByName("dust").dispose();
+                }
+                babylonScene.dispose();
+            }
+            babylonScene = createScene();
+        }
+        
+        babylonScene = createScene();
+
+        engine.runRenderLoop(() => {
+            if (babylonScene && world) {
+                gameLoop();
+                babylonScene.render();
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            engine.resize();
+        });
+
+        document.getElementById('resetButton').addEventListener('click', resetSimulation);
+        document.getElementById('gConstant').addEventListener('input', (event) => {
+            G = parseFloat(event.target.value);
+            gValueDisplay.textContent = G.toFixed(2);
+        });
+
+    </script>
+</body>
+</html>
